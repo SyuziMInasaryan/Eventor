@@ -1,7 +1,15 @@
-from sqlmodel import SQLModel, Field
-from typing import Optional
 
-class Category(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    name: str = Field(index=True, max_length=255)
-    description: Optional[str] = Field(default=None, max_length=1000)
+from sqlalchemy import Column, Integer, String
+from sqlalchemy.orm import relationship
+
+from src.database.models.models import Base
+
+
+class Category(Base):
+    __tablename__ = "category"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+    description = Column(String, nullable=False)
+
+    events = relationship("Event", back_populates="category")
