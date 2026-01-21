@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from pydantic import ConfigDict
 
 class CategoryBase(BaseModel):
     name: str
@@ -10,8 +11,9 @@ class CategoryCreate(CategoryBase):
 class CategoryRead(CategoryBase):
     id: int
 
-    class Config:
-        orm_mode = True
+
+class EventRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
 
 class CategoryUpdate(CategoryBase):
     name: str

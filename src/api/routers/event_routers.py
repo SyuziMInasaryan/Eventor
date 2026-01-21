@@ -1,130 +1,62 @@
-
-from typing import List
-
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Form
-from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from src import schemas
-from src.database.models import Category, User
-from src.database.session import get_async_session
-from src.database.models.event import Event
-from src.schemas.category import CategoryRead, CategoryUpdate
-from src.schemas.event import EventCreate, EventUpdate, EventRead
+from sqlalchemy.exc import IntegrityError
 
-router = APIRouter(
-    prefix="/events",
-    tags=["events"],
-)
+from ...database.repositories.category_repositories import CategoryRepository
+from ...database.repositories.event_repositories import EventRepository
+from ...database.repositories.user_repositories import UserRepository
+from ...utils.files import save_event_image
+from ...database.session import get_async_session
+from ...schemas.event import EventRead
 
-@router.post(
-    "/create",
-    response_model=EventRead,
-    status_code=status.HTTP_201_CREATED,
-)
+router = APIRouter(prefix="/events", tags=["events"])
+
+
+@router.post("/create", response_model=EventRead, status_code=status.HTTP_201_CREATED)
 async def create_event(
     name: str = Form(...),
     description: str | None = Form(None),
     category_id: int = Form(...),
     author_id: int = Form(...),
-    image: UploadFile = File(None),
+    image: UploadFile | None = File(None),
     db_session: AsyncSession = Depends(get_async_session),
 ):
-    # проверка дубликата по имени
-    result = await db_session.execute(
-        select(Event).where(Event.name == name)
-    )
-    existing = result.scalar_one_or_none()
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Event with this name already exists",
-        )
+    # проверяем автора
+    user_repo = UserRepository()
+    author = await user_repo.get_user_by_id(session=db_session, user_id=author_id)
+    if author is None:
+        raise HTTPException(status_code=404, detail="User not found")
 
-    # проверяем, что такая категория существует
-    category = await db_session.get(Category, category_id)
-    if not category:
-        raise HTTPException(status_code=400, detail="Category not found")
-
-    # проверяем, что такой автор существует
-    author = await db_session.get(User, author_id)
-    if not author:
-        raise HTTPException(status_code=400, detail="Author not found")
-
-    # читаем картинку
-    image_data = await image.read() if image else None
-
-    event = Event(
-        name=name,
-        description=description,
-        image=image_data,
-        category_id=category_id,
-        author_id=author_id,
-    )
-
-    db_session.add(event)
-    await db_session.commit()
-    await db_session.refresh(event)
-
-    return event
-
-
-@router.get(
-    "/",
-    response_model=List[CategoryRead],
-)
-async def list_categories(
-    session: AsyncSession = Depends(get_async_session),
-):
-    result = await session.execute(select(Category))
-    categories = result.scalars().all()
-    return categories
-
-@router.get("/{id}", response_model=CategoryRead)
-async def get_category(
-    id: int,
-    session: AsyncSession = Depends(get_async_session)
-):
-    result = await session.get(Category, id)
-
-    if result is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Category not found"
-        )
-
-    return result
-
-@router.delete('/delete/{id}')
-async def delete_category(
-    id: int,
-    session: AsyncSession = Depends(get_async_session),
-):
-    category = await session.get(Category, id)
+    # проверяем категорию
+    category_repo = CategoryRepository()
+    category = await category_repo.get_category_by_id(id=category_id, session=db_session)
     if category is None:
         raise HTTPException(status_code=404, detail="Category not found")
-    await session.delete(category)
-    await session.commit()
 
-    return {"message": "Successfully deleted"}
+    # сохраняем картинку
+    image_path = None
+    if image:
+        image_path = await save_event_image(image)
 
-@router.put('/cat_update/{id}')
-async def update_category(
-    id: int,
-    category_update: CategoryUpdate,
-    session: AsyncSession = Depends(get_async_session),):
-    result = await session.execute(select(Category).where(Category.id == id))
-    category = result.scalar()
-    if category is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
-
-    stmt = (
-            update(Category)
-            .where(Category.id == id)
-            .values(**category_update.model_dump())
-            .returning(Category)
+    # создаем event
+    event_repo = EventRepository()
+    try:
+        event = await event_repo.create_event(
+            db_session=db_session,
+            name=name,
+            description=description,
+            category_id=category_id,
+            author_id=author_id,
+            image_path=image_path,
         )
+        await db_session.commit()
+        await db_session.refresh(event)
+        return event
 
-    result = await session.scalar(stmt)
-    await session.commit()
+    except IntegrityError:
+        await db_session.rollback()
+        raise HTTPException(status_code=409, detail="Event already exists")
 
-    return result
+    except Exception:
+        await db_session.rollback()
+        raise

@@ -22,3 +22,7 @@ class Settings(BaseSettings):
 
 def load_settings() -> Settings:
     return Settings()
+
+
+def settings():
+    return None

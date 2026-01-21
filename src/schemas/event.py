@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-
+from pydantic import ConfigDict
 
 
 class EventBase(BaseModel):
@@ -12,11 +12,12 @@ class EventBase(BaseModel):
 class EventCreate(EventBase):
     pass
 
-class EventRead(EventBase):
-    id: int
 
-    class Config:
-        orm_mode = True
+
+class EventRead(BaseModel):
+    id: int
+    model_config = ConfigDict(from_attributes=True)
+
 
 class EventUpdate(EventBase):
     name: str
